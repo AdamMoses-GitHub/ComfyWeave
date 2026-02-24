@@ -721,12 +721,12 @@ class MainWindow(QMainWindow):
 
 
 def _apply_theme(theme: str) -> None:
+    from PySide6.QtGui import QPalette, QColor
     app = QApplication.instance()
     if not app:
         return
     if theme == "dark":
         app.setStyle("Fusion")
-        from PySide6.QtGui import QPalette, QColor
         palette = QPalette()
         palette.setColor(QPalette.ColorRole.Window,          QColor(45, 45, 45))
         palette.setColor(QPalette.ColorRole.WindowText,      QColor(220, 220, 220))

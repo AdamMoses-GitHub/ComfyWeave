@@ -55,7 +55,6 @@ class QueuePanel(QWidget):
 
         # Header row
         header_row = QHBoxLayout()
-        header_row.addWidget(QLabel("Queue", self))
         self._clear_btn = QPushButton("Clear Done", self)
         self._clear_btn.setFixedHeight(22)
         self._clear_btn.clicked.connect(self._clear_completed)
