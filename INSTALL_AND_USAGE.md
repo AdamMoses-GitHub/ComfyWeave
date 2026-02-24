@@ -86,8 +86,6 @@ python main.py
 COMFYUI_SERVER=http://192.168.1.50:8188 COMFYUI_AUTO_CONNECT=1 python main.py
 ```
 
-VS Code users: five pre-built launch configurations are in [.vscode/launch.json](.vscode/launch.json).
-
 ---
 
 ## Usage Workflows

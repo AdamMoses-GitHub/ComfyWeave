@@ -96,7 +96,7 @@ class MainWindow(QMainWindow):
 
         # Queue dock (bottom)
         self._queue_panel = QueuePanel(self)
-        queue_dock = QDockWidget("Queue", self)
+        queue_dock = QDockWidget("Generation Queue", self)
         queue_dock.setObjectName("queue_dock")
         queue_dock.setWidget(self._queue_panel)
         queue_dock.setAllowedAreas(
