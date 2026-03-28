@@ -63,8 +63,15 @@ class LoRAPickerDialog(QDialog):
         self._search.textChanged.connect(self._filter)
         layout.addWidget(self._search)
 
-        # Checkable list
+        # Checkable list — ExtendedSelection lets the user Shift/Ctrl+click rows
+        # then mass-check or mass-uncheck them via the toolbar buttons below.
         self._list = QListWidget(self)
+        self._list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._list.setToolTip(
+            "Click to toggle a single LoRA.\n"
+            "Shift+click / Ctrl+click to highlight multiple rows,\n"
+            "then use \u2713 Selected / \u2717 Selected to check or uncheck them all."
+        )
         for name in self._choices:
             item = QListWidgetItem(name)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
@@ -80,6 +87,14 @@ class LoRAPickerDialog(QDialog):
         self._status_lbl = QLabel(self)
         self._status_lbl.setStyleSheet("color: #888; font-size: 11px;")
         self._update_status()
+        chk_sel_btn = QPushButton("✓ Selected", self)
+        chk_sel_btn.setFixedHeight(24)
+        chk_sel_btn.setToolTip("Check all highlighted rows (use Shift/Ctrl+click to highlight multiple)")
+        chk_sel_btn.clicked.connect(self._check_selected)
+        unchk_sel_btn = QPushButton("✗ Selected", self)
+        unchk_sel_btn.setFixedHeight(24)
+        unchk_sel_btn.setToolTip("Uncheck all highlighted rows (use Shift/Ctrl+click to highlight multiple)")
+        unchk_sel_btn.clicked.connect(self._uncheck_selected)
         sel_all_btn = QPushButton("Select All", self)
         sel_all_btn.setFixedHeight(24)
         sel_all_btn.clicked.connect(self._select_all)
@@ -88,6 +103,8 @@ class LoRAPickerDialog(QDialog):
         clr_all_btn.clicked.connect(self._clear_all)
         bottom_row.addWidget(self._status_lbl)
         bottom_row.addStretch()
+        bottom_row.addWidget(chk_sel_btn)
+        bottom_row.addWidget(unchk_sel_btn)
         bottom_row.addWidget(sel_all_btn)
         bottom_row.addWidget(clr_all_btn)
         layout.addLayout(bottom_row)
@@ -124,6 +141,14 @@ class LoRAPickerDialog(QDialog):
             item = self._list.item(i)
             if not item.isHidden():
                 item.setCheckState(Qt.CheckState.Unchecked)
+
+    def _check_selected(self) -> None:
+        for item in self._list.selectedItems():
+            item.setCheckState(Qt.CheckState.Checked)
+
+    def _uncheck_selected(self) -> None:
+        for item in self._list.selectedItems():
+            item.setCheckState(Qt.CheckState.Unchecked)
 
     def _update_status(self) -> None:
         n = len(self._selected)
@@ -633,6 +658,299 @@ class TextSection(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# Dimension size picker dialog
+# ---------------------------------------------------------------------------
+
+class DimPickerDialog(QDialog):
+    """Dialog for managing a list of W×H size pairs for multi-dimension mode."""
+
+    def __init__(
+        self,
+        divisor: int,
+        pairs: list[tuple[int, int]],
+        width_name: str = "width",
+        height_name: str = "height",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Edit Sizes")
+        self.setMinimumSize(320, 360)
+        self._divisor = divisor
+        self._width_name = width_name
+        self._height_name = height_name
+        # Work on a mutable copy; each entry is [w, h]
+        self._pairs: list[list[int]] = [list(p) for p in pairs]
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        hint = QLabel(
+            f"Each row is one W\u00d7H size. Values snap to multiples of {self._divisor}.",
+            self,
+        )
+        hint.setStyleSheet("color: #888; font-size: 10px;")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self._list = QListWidget(self)
+        self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._list.currentRowChanged.connect(self._on_row_changed)
+        layout.addWidget(self._list, stretch=1)
+
+        # Inline editor row (shown below list)
+        edit_row = QHBoxLayout()
+        edit_row.addWidget(QLabel("W:", self))
+        self._w_spin = QSpinBox(self)
+        self._w_spin.setRange(self._divisor, 16384)
+        self._w_spin.setSingleStep(self._divisor)
+        self._w_spin.editingFinished.connect(self._snap_and_sync)
+        edit_row.addWidget(self._w_spin)
+        edit_row.addWidget(QLabel("H:", self))
+        self._h_spin = QSpinBox(self)
+        self._h_spin.setRange(self._divisor, 16384)
+        self._h_spin.setSingleStep(self._divisor)
+        self._h_spin.editingFinished.connect(self._snap_and_sync)
+        edit_row.addWidget(self._h_spin)
+        self._apply_btn = QPushButton("Apply", self)
+        self._apply_btn.setFixedHeight(24)
+        self._apply_btn.clicked.connect(self._apply_edit)
+        edit_row.addWidget(self._apply_btn)
+        layout.addLayout(edit_row)
+
+        # Add / remove row
+        btn_row = QHBoxLayout()
+        add_btn = QPushButton("+ Add", self)
+        add_btn.setFixedHeight(24)
+        add_btn.clicked.connect(self._add_pair)
+        del_btn = QPushButton("Remove", self)
+        del_btn.setFixedHeight(24)
+        del_btn.clicked.connect(self._remove_pair)
+        dup_btn = QPushButton("Duplicate", self)
+        dup_btn.setFixedHeight(24)
+        dup_btn.clicked.connect(self._duplicate_pair)
+        btn_row.addWidget(add_btn)
+        btn_row.addWidget(del_btn)
+        btn_row.addWidget(dup_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._refresh_list()
+
+    def _label(self, w: int, h: int) -> str:
+        return f"{w} \u00d7 {h}"
+
+    def _refresh_list(self, select_row: int = -1) -> None:
+        self._list.blockSignals(True)
+        self._list.clear()
+        for w, h in self._pairs:
+            self._list.addItem(self._label(w, h))
+        self._list.blockSignals(False)
+        row = select_row if 0 <= select_row < len(self._pairs) else (len(self._pairs) - 1)
+        self._list.setCurrentRow(row)
+
+    def _on_row_changed(self, row: int) -> None:
+        if 0 <= row < len(self._pairs):
+            self._w_spin.setValue(self._pairs[row][0])
+            self._h_spin.setValue(self._pairs[row][1])
+
+    def _snap(self, v: int) -> int:
+        d = self._divisor
+        return max(d, round(v / d) * d)
+
+    def _snap_and_sync(self) -> None:
+        """Snap both spinboxes on editingFinished, don't commit to list yet."""
+        self._w_spin.setValue(self._snap(self._w_spin.value()))
+        self._h_spin.setValue(self._snap(self._h_spin.value()))
+
+    def _apply_edit(self) -> None:
+        row = self._list.currentRow()
+        if 0 <= row < len(self._pairs):
+            w = self._snap(self._w_spin.value())
+            h = self._snap(self._h_spin.value())
+            self._pairs[row] = [w, h]
+            self._list.item(row).setText(self._label(w, h))
+
+    def _add_pair(self) -> None:
+        d = self._divisor
+        # Default to last entry, or 512×512 if list is empty
+        if self._pairs:
+            w, h = self._pairs[-1]
+        else:
+            w = h = max(d, self._snap(512))
+        self._pairs.append([w, h])
+        self._refresh_list(len(self._pairs) - 1)
+
+    def _remove_pair(self) -> None:
+        row = self._list.currentRow()
+        if 0 <= row < len(self._pairs) and len(self._pairs) > 1:
+            self._pairs.pop(row)
+            self._refresh_list(min(row, len(self._pairs) - 1))
+
+    def _duplicate_pair(self) -> None:
+        row = self._list.currentRow()
+        if 0 <= row < len(self._pairs):
+            self._pairs.insert(row + 1, list(self._pairs[row]))
+            self._refresh_list(row + 1)
+
+    @property
+    def pairs(self) -> list[tuple[int, int]]:
+        """Return the final list of (w, h) tuples."""
+        return [(p[0], p[1]) for p in self._pairs]
+
+
+# ---------------------------------------------------------------------------
+# Dimension section widget (spinboxes  OR  multi-dim picker button)
+# ---------------------------------------------------------------------------
+
+class DimSection(QWidget):
+    """Wraps the width + height spinboxes for a node.
+
+    Single mode (default) — two plain spinboxes, identical to before.
+    Multi-Dim mode         — shows a button that opens DimPickerDialog; each
+                             (W, H) pair triggers a separate generation.
+    """
+
+    def __init__(
+        self,
+        width_name: str,
+        height_name: str,
+        width_val: int,
+        height_val: int,
+        divisor: int,
+        has_batch_size: bool,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._width_name = width_name
+        self._height_name = height_name
+        self._divisor = divisor
+        self._has_batch_size = has_batch_size
+        self._pairs: list[tuple[int, int]] = [(width_val, height_val)]
+        self._build_ui(width_val, height_val)
+
+    def _build_ui(self, width_val: int, height_val: int) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 2)
+        layout.setSpacing(4)
+
+        self._multi_cb = QCheckBox("Multi-Dim Mode", self)
+        self._multi_cb.setToolTip(
+            "Enable to specify multiple W\u00d7H sizes and run one generation per size."
+        )
+        self._multi_cb.setStyleSheet("font-size: 11px; color: #8ab4d4;")
+        self._multi_cb.toggled.connect(self._on_mode_toggled)
+        layout.addWidget(self._multi_cb)
+
+        # Single-mode spinboxes (side by side)
+        spin_row = QHBoxLayout()
+        spin_row.setContentsMargins(0, 0, 0, 0)
+        spin_row.setSpacing(4)
+        spin_row.addWidget(QLabel(f"{self._width_name}:", self))
+        self._w_spin = self._make_spin(width_val)
+        spin_row.addWidget(self._w_spin)
+        spin_row.addWidget(QLabel(f"{self._height_name}:", self))
+        self._h_spin = self._make_spin(height_val)
+        spin_row.addWidget(self._h_spin)
+        self._spin_container = QWidget(self)
+        self._spin_container.setLayout(spin_row)
+        layout.addWidget(self._spin_container)
+
+        # Multi-mode picker button (hidden initially)
+        self._picker_btn = QPushButton(self._picker_label(), self)
+        self._picker_btn.setVisible(False)
+        self._picker_btn.clicked.connect(self._open_picker)
+        layout.addWidget(self._picker_btn)
+
+    def _make_spin(self, value: int) -> QSpinBox:
+        d = self._divisor
+        snapped = max(d, round(value / d) * d)
+        w = QSpinBox(self)
+        w.setRange(d, 16384)
+        w.setSingleStep(d)
+        w.setValue(snapped)
+        w.setToolTip(
+            f"Must be a multiple of {d}. "
+            "Values are automatically rounded to the nearest valid multiple."
+        )
+        def _snap() -> None:
+            v = w.value()
+            n = max(d, round(v / d) * d)
+            if n != v:
+                w.setValue(n)
+        w.editingFinished.connect(_snap)
+        return w
+
+    def _on_mode_toggled(self, checked: bool) -> None:
+        self._spin_container.setVisible(not checked)
+        self._picker_btn.setVisible(checked)
+        if checked and not self._pairs:
+            self._pairs = [(self._w_spin.value(), self._h_spin.value())]
+        elif checked:
+            # Keep first pair in sync with current spinbox values
+            self._pairs[0] = (self._w_spin.value(), self._h_spin.value())
+        self._picker_btn.setText(self._picker_label())
+
+    def _open_picker(self) -> None:
+        dlg = DimPickerDialog(
+            self._divisor, self._pairs,
+            self._width_name, self._height_name, self,
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._pairs = dlg.pairs
+            self._picker_btn.setText(self._picker_label())
+
+    def _picker_label(self) -> str:
+        n = len(self._pairs)
+        if n == 0:
+            return "Edit sizes\u2026"
+        suffix = " (batch\u2192forced 1)" if self._has_batch_size else ""
+        return f"\U0001f4d0 {n} size{'s' if n != 1 else ''} \u2014 click to change{suffix}"
+
+    # ------------------------------------------------------------------
+    # Public API (mirrors LoRASection / TextSection patterns)
+    # ------------------------------------------------------------------
+
+    def is_multi_mode(self) -> bool:
+        return self._multi_cb.isChecked()
+
+    def get_width(self) -> int:
+        return self._w_spin.value()
+
+    def get_height(self) -> int:
+        return self._h_spin.value()
+
+    def get_pairs(self) -> list[tuple[int, int]] | None:
+        """Multi mode → list of (w, h); single mode → None."""
+        if self._multi_cb.isChecked():
+            return list(self._pairs)
+        return None
+
+    def set_values(self, width: int, height: int) -> None:
+        """Restore single-mode spinbox values (used by apply_overrides)."""
+        self._w_spin.setValue(width)
+        self._h_spin.setValue(height)
+
+    def set_multi_state(self, enabled: bool, pairs: list[tuple[int, int]]) -> None:
+        """Restore multi-mode state (used by apply_overrides)."""
+        if pairs:
+            self._pairs = list(pairs)
+        if enabled and not self._multi_cb.isChecked():
+            self._multi_cb.setChecked(True)
+        elif not enabled and self._multi_cb.isChecked():
+            self._multi_cb.setChecked(False)
+        self._picker_btn.setText(self._picker_label())
+
+
+# ---------------------------------------------------------------------------
 # Per-node editable form
 # ---------------------------------------------------------------------------
 
@@ -642,6 +960,15 @@ class _NodeForm(QGroupBox):
     # Input names treated as spatial dimensions and subject to divisor snapping.
     _DIM_INPUTS = {"width", "height", "max_width", "max_height",
                    "image_width", "image_height", "target_width", "target_height"}
+
+    # Paired width → height names.  When a node has both, a single DimSection
+    # is rendered instead of two independent spinboxes.
+    _DIM_PAIRS: dict[str, str] = {
+        "width":        "height",
+        "max_width":    "max_height",
+        "image_width":  "image_height",
+        "target_width": "target_height",
+    }
 
     # Input names rendered as multi-line text areas (TextSection).
     _TEXT_AREA_INPUTS = {"text", "text_g", "text_l", "text_positive", "text_negative",
@@ -669,8 +996,52 @@ class _NodeForm(QGroupBox):
         layout.setSpacing(4)
         layout.setContentsMargins(8, 8, 8, 8)
 
-        for input_name, value in self._node.inputs.items():
+        inputs = self._node.inputs
+        has_batch = "batch_size" in inputs
+
+        # Height-like names that are already covered by a paired DimSection — skip
+        # their standalone row so they only appear inside the DimSection widget.
+        _height_skip: set[str] = set()
+        for w_name, h_name in self._DIM_PAIRS.items():
+            if (
+                w_name in inputs and h_name in inputs
+                and isinstance(inputs[w_name], int)
+                and isinstance(inputs[h_name], int)
+            ):
+                _height_skip.add(h_name)
+
+        for input_name, value in inputs.items():
+            if input_name in _height_skip:
+                continue  # rendered inside DimSection for its paired width
+
             row = QHBoxLayout()
+
+            # Check whether this is the width side of a dimension pair
+            h_name = self._DIM_PAIRS.get(input_name)
+            if (
+                h_name and h_name in inputs
+                and isinstance(value, int)
+                and isinstance(inputs[h_name], int)
+            ):
+                lbl = QLabel(f"{input_name}/{h_name}:", self)
+                lbl.setFixedWidth(110)
+                lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                row.addWidget(lbl)
+                dim_section = DimSection(
+                    width_name=input_name,
+                    height_name=h_name,
+                    width_val=value,
+                    height_val=inputs[h_name],
+                    divisor=self._dimension_divisor,
+                    has_batch_size=has_batch,
+                    parent=self,
+                )
+                row.addWidget(dim_section)
+                # Register under width_name; get_overrides reads height from it too
+                self._widgets[input_name] = dim_section
+                layout.addLayout(row)
+                continue
+
             lbl = QLabel(input_name + ":", self)
             lbl.setFixedWidth(110)
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -703,6 +1074,7 @@ class _NodeForm(QGroupBox):
             w.setChecked(value)
             return w
         if isinstance(value, int):
+            # Standalone dimension input (unpaired — e.g. only width is present, no height)
             if name in self._DIM_INPUTS:
                 return self._make_dimension_spinbox(name, value)
             w = QSpinBox(self)
@@ -806,6 +1178,10 @@ class _NodeForm(QGroupBox):
                 result[name] = widget.get_value()  # always a single str
             elif isinstance(widget, TextSection):
                 result[name] = widget.get_value()  # always a single str
+            elif isinstance(widget, DimSection):
+                # Emit both width (name) and height from the single DimSection
+                result[name] = widget.get_width()
+                result[widget._height_name] = widget.get_height()
         # When snapshotting for persistence, save rand checkbox state too
         if not for_generate:
             for seed_name, cb in self._seed_randomize.items():
@@ -816,6 +1192,12 @@ class _NodeForm(QGroupBox):
                     texts = widget.get_multi_texts() or []
                     result[f"__text_multi_{name}__"] = True
                     result[f"__text_sel_{name}__"] = texts
+            # Save DimSection multi-mode state
+            for name, widget in self._widgets.items():
+                if isinstance(widget, DimSection) and widget.is_multi_mode():
+                    pairs = widget.get_pairs() or []
+                    result[f"__dim_multi_{name}__"] = True
+                    result[f"__dim_pairs_{name}__"] = [list(p) for p in pairs]
         return result
 
     def apply_overrides(self, data: dict) -> None:
@@ -837,6 +1219,17 @@ class _NodeForm(QGroupBox):
                     widget = self._widgets.get(input_name)
                     if isinstance(widget, TextSection):
                         widget.set_multi_state(True, selected if isinstance(selected, list) else [])
+        # Restore DimSection multi-mode state (do before widget value pass)
+        for key, value in data.items():
+            if key.startswith("__dim_multi_") and key.endswith("__"):
+                width_name = key[12:-2]
+                if bool(value):
+                    pairs_key = f"__dim_pairs_{width_name}__"
+                    raw = data.get(pairs_key, [])
+                    pairs = [tuple(p) for p in raw if isinstance(p, (list, tuple)) and len(p) == 2]
+                    widget = self._widgets.get(width_name)
+                    if isinstance(widget, DimSection):
+                        widget.set_multi_state(True, pairs)
         for name, value in data.items():
             if name.startswith("__"):
                 continue  # skip meta keys
@@ -848,6 +1241,10 @@ class _NodeForm(QGroupBox):
                     widget.set_single_value(str(value))
                 elif isinstance(widget, TextSection):
                     widget.set_single_value(str(value))
+                elif isinstance(widget, DimSection):
+                    # DimSection is stored under width_name; fetch height from data
+                    h_val = data.get(widget._height_name, widget.get_height())
+                    widget.set_values(int(value), int(h_val))
                 elif isinstance(widget, QCheckBox):
                     widget.setChecked(bool(value))
                 elif isinstance(widget, QSpinBox):
@@ -889,6 +1286,22 @@ class _NodeForm(QGroupBox):
                 if texts:
                     steps = [{node_id: {input_name: text}} for text in texts]
                     dims.append((f"{node_title}: {input_name}", steps))
+
+        # Dimension pairs (one step per W×H pair)
+        for input_name, widget in self._widgets.items():
+            if isinstance(widget, DimSection) and widget.is_multi_mode():
+                pairs = widget.get_pairs() or []
+                if pairs:
+                    steps: list[dict] = []
+                    for w_val, h_val in pairs:
+                        patch: dict[str, Any] = {
+                            input_name: w_val,
+                            widget._height_name: h_val,
+                        }
+                        if widget._has_batch_size:
+                            patch["batch_size"] = 1
+                        steps.append({node_id: patch})
+                    dims.append((f"{node_title}: {input_name}×{widget._height_name}", steps))
 
         return dims
 
