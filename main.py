@@ -14,17 +14,22 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure the PySide6 package directory is on PATH so Windows can resolve Qt DLL
-# dependencies (Qt6Core, Qt6Gui, etc.) when the platform plugin (qwindows.dll)
-# is loaded.  This is a no-op when the directory is already on PATH.
+# Python 3.8+ on Windows no longer uses PATH for DLL resolution — it requires
+# os.add_dll_directory().  We also set QT_QPA_PLATFORM_PLUGIN_PATH explicitly
+# because PySide6 can't discover its own plugins when launched via the VS Code
+# debugger without a fully activated conda environment.
 try:
     import importlib.util as _ilu
     _pyside6_spec = _ilu.find_spec("PySide6")
     if _pyside6_spec and _pyside6_spec.origin:
-        _pyside6_dir = str(Path(_pyside6_spec.origin).parent)
-        if _pyside6_dir not in os.environ.get("PATH", ""):
-            os.environ["PATH"] = _pyside6_dir + os.pathsep + os.environ.get("PATH", "")
-    del _ilu, _pyside6_spec, _pyside6_dir
+        _pyside6_dir = Path(_pyside6_spec.origin).parent
+        # Register DLL search directory (Python 3.8+ mechanism)
+        os.add_dll_directory(str(_pyside6_dir))
+        # Tell Qt where to find platform plugins (qwindows.dll etc.)
+        _plugins_dir = str(_pyside6_dir / "plugins" / "platforms")
+        if not os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH"):
+            os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = _plugins_dir
+    del _ilu, _pyside6_spec, _pyside6_dir, _plugins_dir
 except Exception:
     pass
 
