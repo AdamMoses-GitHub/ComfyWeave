@@ -53,22 +53,19 @@ class QueuePanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        # Header row
+        # Header row: summary (left) + Clear Done (right)
         header_row = QHBoxLayout()
+        self._summary_label = QLabel("No jobs yet", self)
+        self._summary_label.setStyleSheet(
+            "QLabel { font-size: 13px; font-weight: bold; padding: 2px 4px; }"
+        )
+        self._summary_label.setWordWrap(False)
+        header_row.addWidget(self._summary_label, stretch=1)
         self._clear_btn = QPushButton("Clear Done", self)
         self._clear_btn.setFixedHeight(22)
         self._clear_btn.clicked.connect(self._clear_completed)
-        header_row.addStretch()
         header_row.addWidget(self._clear_btn)
         layout.addLayout(header_row)
-
-        # Summary status line
-        self._summary_label = QLabel("", self)
-        self._summary_label.setStyleSheet(
-            "QLabel { color: #aaaaaa; font-size: 11px; padding: 1px 4px; }"
-        )
-        self._summary_label.setWordWrap(False)
-        layout.addWidget(self._summary_label)
 
         # Refresh timer — keeps the "running" ETA ticking every second
         self._summary_timer = QTimer(self)
@@ -225,7 +222,7 @@ class QueuePanel(QWidget):
         failed   = sum(1 for j in jobs if j.status in (JobStatus.FAILED, JobStatus.CANCELLED))
 
         if total == 0:
-            self._summary_label.setText("")
+            self._summary_label.setText("No jobs yet")
             self._summary_timer.stop()
             return
 

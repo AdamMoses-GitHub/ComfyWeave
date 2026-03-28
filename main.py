@@ -14,6 +14,20 @@ import os
 import sys
 from pathlib import Path
 
+# Ensure the PySide6 package directory is on PATH so Windows can resolve Qt DLL
+# dependencies (Qt6Core, Qt6Gui, etc.) when the platform plugin (qwindows.dll)
+# is loaded.  This is a no-op when the directory is already on PATH.
+try:
+    import importlib.util as _ilu
+    _pyside6_spec = _ilu.find_spec("PySide6")
+    if _pyside6_spec and _pyside6_spec.origin:
+        _pyside6_dir = str(Path(_pyside6_spec.origin).parent)
+        if _pyside6_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = _pyside6_dir + os.pathsep + os.environ.get("PATH", "")
+    del _ilu, _pyside6_spec, _pyside6_dir
+except Exception:
+    pass
+
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 

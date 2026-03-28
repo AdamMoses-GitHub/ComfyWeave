@@ -490,6 +490,11 @@ class ImageViewer(QWidget):
         self._copy_btn.setVisible(False)
         self._copy_btn.clicked.connect(self._on_copy)
 
+        self._clear_btn = QPushButton("Clear Images", self)
+        self._clear_btn.setVisible(False)
+        self._clear_btn.setToolTip("Remove all images from the grid")
+        self._clear_btn.clicked.connect(self.clear)
+
         self._info_label = QLabel("No images", self)
         self._info_label.setStyleSheet("color: #888; font-size: 11px;")
         self._info_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -497,6 +502,7 @@ class ImageViewer(QWidget):
         toolbar.addWidget(self._back_btn)
         toolbar.addWidget(self._info_label)
         toolbar.addStretch()
+        toolbar.addWidget(self._clear_btn)
         toolbar.addWidget(self._copy_btn)
         toolbar.addWidget(self._save_btn)
         root.addLayout(toolbar)
@@ -566,6 +572,8 @@ class ImageViewer(QWidget):
         self._grid_layout.addWidget(thumb)
         total = len(self._pixmaps)
         self._info_label.setText(f"{total} image(s)")
+        if total == 1 and self._stack.currentIndex() == 0:
+            self._clear_btn.setVisible(True)
         # If detail view is open, refresh nav state so the › button enables for new images.
         if self._stack.currentIndex() == 1 and self._current_index >= 0:
             self._detail_page.set_nav_state(self._current_index, total)
@@ -580,6 +588,7 @@ class ImageViewer(QWidget):
         self._back_btn.setVisible(True)
         self._save_btn.setVisible(False)
         self._copy_btn.setVisible(False)
+        self._clear_btn.setVisible(False)
         self._detail_page.hide_nav()
         self._detail_page.set_meta(None, show_lora=False)
         self._current_index = -1
@@ -591,6 +600,7 @@ class ImageViewer(QWidget):
         self._back_btn.setVisible(False)
         self._save_btn.setVisible(False)
         self._copy_btn.setVisible(False)
+        self._clear_btn.setVisible(bool(self._pixmaps))
 
     def clear(self) -> None:
         self._pixmaps.clear()
@@ -619,6 +629,7 @@ class ImageViewer(QWidget):
         self._back_btn.setVisible(True)
         self._save_btn.setVisible(True)
         self._copy_btn.setVisible(True)
+        self._clear_btn.setVisible(False)
         name = self._filenames[index] or f"image_{index + 1}"
         total = len(self._pixmaps)
         self._info_label.setText(f"{index + 1} / {total}  —  {name}")
