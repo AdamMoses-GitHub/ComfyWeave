@@ -992,6 +992,13 @@ class _NodeForm(QGroupBox):
         self._build()
 
     def _build(self) -> None:
+        self.setCheckable(True)
+        self.setChecked(True)
+        self.setToolTip(
+            "Uncheck to bypass this node — it will use its original workflow values "
+            "and be excluded from generation."
+        )
+
         layout = QVBoxLayout(self)
         layout.setSpacing(4)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -1148,6 +1155,10 @@ class _NodeForm(QGroupBox):
         combo.setToolTip(tip)
         return combo
 
+    def is_bypassed(self) -> bool:
+        """Return True when the node's group box checkbox is unchecked."""
+        return not self.isChecked()
+
     def get_overrides(self, for_generate: bool = True) -> dict[str, Any]:
         """Collect current widget values as an input override dict.
 
@@ -1155,7 +1166,14 @@ class _NodeForm(QGroupBox):
         rand checkbox substitutes a fresh random seed.  When False (used when
         snapshotting for persistence), the spinbox's actual displayed value is used
         so the saved state isn't polluted with throwaway random numbers.
+
+        Bypassed nodes (group box unchecked) return an empty dict at generation
+        time so their original workflow values are used unchanged.
         """
+        # Bypassed: omit from generation but still snapshot all values for persistence
+        if for_generate and self.is_bypassed():
+            return {}
+
         result: dict[str, Any] = {}
         for name, widget in self._widgets.items():
             # Check if seed is marked random — only substitute when actually generating
@@ -1198,10 +1216,15 @@ class _NodeForm(QGroupBox):
                     pairs = widget.get_pairs() or []
                     result[f"__dim_multi_{name}__"] = True
                     result[f"__dim_pairs_{name}__"] = [list(p) for p in pairs]
+            # Save bypass state
+            result["__bypassed__"] = self.is_bypassed()
         return result
 
     def apply_overrides(self, data: dict) -> None:
         """Restore saved widget values from a {input_name: value} dict."""
+        # Restore bypass state before anything else (affects child widget enabled state)
+        if "__bypassed__" in data:
+            self.setChecked(not bool(data["__bypassed__"]))
         # Restore rand checkbox states first (they affect spinbox enabled state)
         for key, value in data.items():
             if key.startswith("__rand_") and key.endswith("__"):
@@ -1267,6 +1290,9 @@ class _NodeForm(QGroupBox):
         dicts ``{node_id: {input_name: value}}``.  Empty list when no multi-mode
         dimensions are active.
         """
+        if self.is_bypassed():
+            return []
+
         dims: list[tuple[str, list[dict]]] = []
         node_id = self._node.node_id
         node_title = self._node.title
@@ -1371,6 +1397,9 @@ class WorkflowPanel(QWidget):
         toolbar = QHBoxLayout()
         self._load_btn = QPushButton("Load Workflow…", self)
         self._load_btn.clicked.connect(self._on_load)
+        self._load_img_btn = QPushButton("From Image…", self)
+        self._load_img_btn.setToolTip("Extract workflow embedded in a ComfyUI-generated PNG")
+        self._load_img_btn.clicked.connect(self._on_load_from_image)
         self._workflow_label = QLabel("No workflow loaded", self)
         self._workflow_label.setStyleSheet("color: #888; font-size: 11px;")
         self._workflow_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -1380,6 +1409,7 @@ class WorkflowPanel(QWidget):
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.clicked.connect(self.refresh_models_requested.emit)
         toolbar.addWidget(self._load_btn)
+        toolbar.addWidget(self._load_img_btn)
         toolbar.addWidget(self._workflow_label)
         toolbar.addWidget(self._refresh_btn)
         root.addLayout(toolbar)
@@ -1517,14 +1547,42 @@ class WorkflowPanel(QWidget):
             )
         self._populate_forms()
 
+    def _on_load_from_image(self) -> None:
+        start_dir = ""
+        if self._cfg_mgr:
+            start_dir = self._cfg_mgr.config.last_workflow_dir
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open PNG Image", start_dir,
+            "PNG Images (*.png);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            self._manager.load_from_png(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Workflow Error", str(exc))
+            return
+        if self._cfg_mgr:
+            import os as _os
+            self._cfg_mgr.update(
+                last_workflow_dir=_os.path.dirname(path),
+                last_workflow_path=path,
+            )
+        self._populate_forms()
+
     def load_from_path(self, path: str) -> bool:
         """Silently load a workflow from *path*. Returns True on success.
 
-        Used by MainWindow on startup to restore the previous session's workflow.
-        Also restores last-session form values and batch count from config.
+        Accepts both ``.json`` API-format files and ``.png`` files with
+        embedded workflow metadata.  Used by MainWindow on startup to restore
+        the previous session's workflow.  Also restores last-session form
+        values and batch count from config.
         """
         try:
-            self._manager.load_from_file(path)
+            if path.lower().endswith(".png"):
+                self._manager.load_from_png(path)
+            else:
+                self._manager.load_from_file(path)
         except Exception:
             return False
         self._populate_forms()
@@ -1537,6 +1595,20 @@ class WorkflowPanel(QWidget):
                     if node_data and isinstance(node_data, dict):
                         form.apply_overrides(node_data)
             self._batch_spin.setValue(self._cfg_mgr.config.batch_count)
+        return True
+
+    def load_from_png_bytes(self, raw: bytes) -> bool:
+        """Extract and load a workflow from in-memory PNG bytes.
+
+        Returns True on success, False on failure.  Call-sites that need to
+        show error dialogs should check the return value and display their
+        own message.
+        """
+        try:
+            self._manager.load_from_png_bytes(raw)
+        except Exception:
+            return False
+        self._populate_forms()
         return True
 
     def get_all_overrides(self) -> dict:

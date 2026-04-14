@@ -456,6 +456,8 @@ class _DetailPage(QWidget):
 class ImageViewer(QWidget):
     """Two-mode image viewer: thumbnail grid and full-size detail view."""
 
+    load_workflow_requested = Signal(bytes)  # emits raw PNG bytes of the current image
+
     def __init__(
         self,
         cfg_mgr: "ConfigManager | None" = None,
@@ -465,6 +467,7 @@ class ImageViewer(QWidget):
         self._cfg_mgr = cfg_mgr
         self._pixmaps: list[QPixmap] = []
         self._filenames: list[str] = []
+        self._raw_bytes: list[bytes] = []
         self._current_index: int = -1
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._build_ui()
@@ -490,6 +493,11 @@ class ImageViewer(QWidget):
         self._copy_btn.setVisible(False)
         self._copy_btn.clicked.connect(self._on_copy)
 
+        self._load_wf_btn = QPushButton("Load Workflow", self)
+        self._load_wf_btn.setVisible(False)
+        self._load_wf_btn.setToolTip("Extract and load the workflow embedded in this image")
+        self._load_wf_btn.clicked.connect(self._on_load_workflow)
+
         self._clear_btn = QPushButton("Clear Images", self)
         self._clear_btn.setVisible(False)
         self._clear_btn.setToolTip("Remove all images from the grid")
@@ -504,6 +512,7 @@ class ImageViewer(QWidget):
         toolbar.addStretch()
         toolbar.addWidget(self._clear_btn)
         toolbar.addWidget(self._copy_btn)
+        toolbar.addWidget(self._load_wf_btn)
         toolbar.addWidget(self._save_btn)
         root.addLayout(toolbar)
 
@@ -535,6 +544,7 @@ class ImageViewer(QWidget):
         self._index_colors: list[str] = []
         self._index_meta: list[_ImageMeta | None] = []
         self._index_generation_ids: list[str] = []
+        self._index_raw_bytes: list[bytes] = []
 
     # ------------------------------------------------------------------
     # Public interface
@@ -547,6 +557,7 @@ class ImageViewer(QWidget):
         gen_time: float | None = None,
         generation_id: str = "",
         meta: _ImageMeta | None = None,
+        raw_bytes: bytes | None = None,
     ) -> None:
         """Append an image to the viewer grid."""
         # Pick palette based on current config setting
@@ -567,6 +578,7 @@ class ImageViewer(QWidget):
         self._index_colors.append(bg_color)
         self._index_meta.append(meta)
         self._index_generation_ids.append(generation_id)
+        self._index_raw_bytes.append(raw_bytes or b"")
         thumb = _ThumbnailLabel(index, pixmap, gen_time, bg_color, self._grid_container)
         thumb.clicked.connect(self._show_detail)
         self._grid_layout.addWidget(thumb)
@@ -588,6 +600,7 @@ class ImageViewer(QWidget):
         self._back_btn.setVisible(True)
         self._save_btn.setVisible(False)
         self._copy_btn.setVisible(False)
+        self._load_wf_btn.setVisible(False)
         self._clear_btn.setVisible(False)
         self._detail_page.hide_nav()
         self._detail_page.set_meta(None, show_lora=False)
@@ -600,6 +613,7 @@ class ImageViewer(QWidget):
         self._back_btn.setVisible(False)
         self._save_btn.setVisible(False)
         self._copy_btn.setVisible(False)
+        self._load_wf_btn.setVisible(False)
         self._clear_btn.setVisible(bool(self._pixmaps))
 
     def clear(self) -> None:
@@ -608,6 +622,7 @@ class ImageViewer(QWidget):
         self._index_colors.clear()
         self._index_meta.clear()
         self._index_generation_ids.clear()
+        self._index_raw_bytes.clear()
         self._current_index = -1
         while self._grid_layout.count():
             item = self._grid_layout.takeAt(0)
@@ -629,6 +644,8 @@ class ImageViewer(QWidget):
         self._back_btn.setVisible(True)
         self._save_btn.setVisible(True)
         self._copy_btn.setVisible(True)
+        has_bytes = bool(self._index_raw_bytes[index] if index < len(self._index_raw_bytes) else b"")
+        self._load_wf_btn.setVisible(has_bytes)
         self._clear_btn.setVisible(False)
         name = self._filenames[index] or f"image_{index + 1}"
         total = len(self._pixmaps)
@@ -697,6 +714,14 @@ class ImageViewer(QWidget):
         pixmap = self._detail_view.current_pixmap()
         if pixmap:
             QGuiApplication.clipboard().setPixmap(pixmap)
+
+    def _on_load_workflow(self) -> None:
+        idx = self._current_index
+        if idx < 0 or idx >= len(self._index_raw_bytes):
+            return
+        raw = self._index_raw_bytes[idx]
+        if raw:
+            self.load_workflow_requested.emit(raw)
 
 
 # ------------------------------------------------------------------
