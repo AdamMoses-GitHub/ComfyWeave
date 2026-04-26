@@ -79,7 +79,7 @@ class _ThumbnailLabel(QLabel):
         self.setFixedSize(_THUMB_SIZE + 4, _THUMB_SIZE + 4)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet(
-            f"QLabel {{ border: 2px solid #444; border-radius: 4px; background: {bg_color}; }}"
+            f"QLabel {{ border: 3px solid {bg_color}; border-radius: 4px; background: {bg_color}; }}"
             "QLabel:hover { border-color: #4a9eda; }"
         )
         self.setCursor(Qt.CursorShape.PointingHandCursor)

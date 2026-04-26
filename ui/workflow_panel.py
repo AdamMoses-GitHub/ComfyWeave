@@ -664,6 +664,37 @@ class TextSection(QWidget):
 class DimPickerDialog(QDialog):
     """Dialog for managing a list of W×H size pairs for multi-dimension mode."""
 
+    # (label, width, height) — portrait variants added automatically as a separate group
+    _PRESETS: list[tuple[str, int, int]] = [
+        # Square
+        ("512 × 512  (SD 1.x standard)",          512,  512),
+        ("768 × 768  (SD 1.x high-res)",           768,  768),
+        ("1024 × 1024  (SDXL / Flux square)",     1024, 1024),
+        ("1536 × 1536  (large square)",           1536, 1536),
+        ("2048 × 2048  (2K square)",              2048, 2048),
+        # Landscape 16:9
+        ("1280 × 720  (720p HD)",                 1280,  720),
+        ("1920 × 1080  (1080p FHD)",              1920, 1080),
+        ("2560 × 1440  (1440p QHD)",              2560, 1440),
+        ("3840 × 2160  (4K UHD)",                 3840, 2160),
+        # Landscape 16:9 — SDXL-native
+        ("1344 × 768  (SDXL 16:9 landscape)",     1344,  768),
+        ("768 × 1344  (SDXL 16:9 portrait)",       768, 1344),
+        # Landscape 3:2
+        ("1216 × 832  (SDXL 3:2 landscape)",      1216,  832),
+        ("832 × 1216  (SDXL 3:2 portrait)",        832, 1216),
+        # Landscape 4:3
+        ("1152 × 896  (SDXL 4:3 landscape)",      1152,  896),
+        ("896 × 1152  (SDXL 4:3 portrait)",        896, 1152),
+        # Ultrawide 21:9
+        ("2560 × 1080  (ultrawide FHD)",          2560, 1080),
+        ("3440 × 1440  (ultrawide QHD)",          3440, 1440),
+        # Social / mobile
+        ("1080 × 1920  (9:16 mobile/stories)",    1080, 1920),
+        ("1080 × 1350  (4:5 Instagram portrait)", 1080, 1350),
+        ("1080 × 1080  (1:1 Instagram square)",   1080, 1080),
+    ]
+
     def __init__(
         self,
         divisor: int,
@@ -674,7 +705,7 @@ class DimPickerDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Edit Sizes")
-        self.setMinimumSize(320, 360)
+        self.setMinimumSize(460, 400)
         self._divisor = divisor
         self._width_name = width_name
         self._height_name = height_name
@@ -693,6 +724,21 @@ class DimPickerDialog(QDialog):
         hint.setStyleSheet("color: #888; font-size: 10px;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
+
+        # Preset picker row
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("Preset:", self))
+        self._preset_combo = QComboBox(self)
+        self._preset_combo.setToolTip("Select a standard size to add to the list")
+        for label, _w, _h in self._PRESETS:
+            self._preset_combo.addItem(label)
+        preset_row.addWidget(self._preset_combo, stretch=1)
+        add_preset_btn = QPushButton("+ Add Preset", self)
+        add_preset_btn.setFixedHeight(24)
+        add_preset_btn.setToolTip("Append the selected preset size to the list")
+        add_preset_btn.clicked.connect(self._add_preset)
+        preset_row.addWidget(add_preset_btn)
+        layout.addLayout(preset_row)
 
         self._list = QListWidget(self)
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -730,9 +776,14 @@ class DimPickerDialog(QDialog):
         dup_btn = QPushButton("Duplicate", self)
         dup_btn.setFixedHeight(24)
         dup_btn.clicked.connect(self._duplicate_pair)
+        swap_btn = QPushButton("Swap W↔H", self)
+        swap_btn.setFixedHeight(24)
+        swap_btn.setToolTip("Swap width and height of the selected size")
+        swap_btn.clicked.connect(self._swap_pair)
         btn_row.addWidget(add_btn)
         btn_row.addWidget(del_btn)
         btn_row.addWidget(dup_btn)
+        btn_row.addWidget(swap_btn)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -778,6 +829,23 @@ class DimPickerDialog(QDialog):
             h = self._snap(self._h_spin.value())
             self._pairs[row] = [w, h]
             self._list.item(row).setText(self._label(w, h))
+
+    def _add_preset(self) -> None:
+        idx = self._preset_combo.currentIndex()
+        if 0 <= idx < len(self._PRESETS):
+            _, pw, ph = self._PRESETS[idx]
+            w = self._snap(pw)
+            h = self._snap(ph)
+            self._pairs.append([w, h])
+            self._refresh_list(len(self._pairs) - 1)
+
+    def _swap_pair(self) -> None:
+        row = self._list.currentRow()
+        if 0 <= row < len(self._pairs):
+            self._pairs[row] = [self._pairs[row][1], self._pairs[row][0]]
+            self._list.item(row).setText(self._label(*self._pairs[row]))
+            self._w_spin.setValue(self._pairs[row][0])
+            self._h_spin.setValue(self._pairs[row][1])
 
     def _add_pair(self) -> None:
         d = self._divisor
@@ -1023,6 +1091,30 @@ class _NodeForm(QGroupBox):
 
             row = QHBoxLayout()
 
+            # Paired PrimitiveInt: render width + height from two separate nodes as one DimSection
+            if (
+                input_name == "value"
+                and self._node.class_type == "PrimitiveInt"
+                and self._node.paired_height_node_id is not None
+            ):
+                lbl = QLabel("width/height:", self)
+                lbl.setFixedWidth(110)
+                lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                row.addWidget(lbl)
+                dim_section = DimSection(
+                    width_name="width",
+                    height_name="height",
+                    width_val=int(value),
+                    height_val=int(self._node.paired_height_value or value),
+                    divisor=self._dimension_divisor,
+                    has_batch_size=False,
+                    parent=self,
+                )
+                row.addWidget(dim_section)
+                self._widgets["value"] = dim_section
+                layout.addLayout(row)
+                continue
+
             # Check whether this is the width side of a dimension pair
             h_name = self._DIM_PAIRS.get(input_name)
             if (
@@ -1058,8 +1150,8 @@ class _NodeForm(QGroupBox):
             row.addWidget(widget)
             self._widgets[input_name] = widget
 
-            # Seed gets a randomize checkbox
-            if input_name == "seed":
+            # Seed / noise_seed get a randomize checkbox
+            if input_name in ("seed", "noise_seed"):
                 cb = QCheckBox("rand", self)
                 cb.setToolTip("Randomize seed on each generation")
                 cb.toggled.connect(lambda checked, w=widget: w.setEnabled(not checked))
@@ -1099,7 +1191,11 @@ class _NodeForm(QGroupBox):
             return w
         # String — use TextSection for text-area inputs, QLineEdit for others
         if isinstance(value, str):
-            if name in self._TEXT_AREA_INPUTS and self._text_mgr is not None:
+            is_text_area = name in self._TEXT_AREA_INPUTS
+            # PrimitiveStringMultiline stores the prompt under the generic name "value"
+            if not is_text_area and self._node.class_type == "PrimitiveStringMultiline" and name == "value":
+                is_text_area = True
+            if is_text_area and self._text_mgr is not None:
                 field_key = f"{self._node.title}_{name}"
                 return TextSection(field_key, str(value), self._text_mgr, self)
             w = QLineEdit(self)
@@ -1199,7 +1295,13 @@ class _NodeForm(QGroupBox):
             elif isinstance(widget, DimSection):
                 # Emit both width (name) and height from the single DimSection
                 result[name] = widget.get_width()
-                result[widget._height_name] = widget.get_height()
+                if self._node.paired_height_node_id and name == "value":
+                    # Height belongs to a separate node — persist under a sentinel key
+                    if not for_generate:
+                        result["__paired_h__"] = widget.get_height()
+                    # (height override for the other node is emitted by get_paired_height_override)
+                else:
+                    result[widget._height_name] = widget.get_height()
         # When snapshotting for persistence, save rand checkbox state too
         if not for_generate:
             for seed_name, cb in self._seed_randomize.items():
@@ -1219,6 +1321,22 @@ class _NodeForm(QGroupBox):
             # Save bypass state
             result["__bypassed__"] = self.is_bypassed()
         return result
+
+    def get_paired_height_override(self, for_generate: bool = True) -> dict[str, dict]:
+        """Return ``{height_node_id: {"value": h}}`` when this is a paired PrimitiveInt.
+
+        Used by WorkflowPanel to inject the height-node override into the top-level
+        overrides dict so it reaches WorkflowManager.apply_overrides correctly.
+        Returns an empty dict when there is no pairing or the node is bypassed.
+        """
+        if not self._node.paired_height_node_id:
+            return {}
+        if for_generate and self.is_bypassed():
+            return {}
+        widget = self._widgets.get("value")
+        if not isinstance(widget, DimSection):
+            return {}
+        return {self._node.paired_height_node_id: {"value": widget.get_height()}}
 
     def apply_overrides(self, data: dict) -> None:
         """Restore saved widget values from a {input_name: value} dict."""
@@ -1265,8 +1383,12 @@ class _NodeForm(QGroupBox):
                 elif isinstance(widget, TextSection):
                     widget.set_single_value(str(value))
                 elif isinstance(widget, DimSection):
-                    # DimSection is stored under width_name; fetch height from data
-                    h_val = data.get(widget._height_name, widget.get_height())
+                    # DimSection is stored under width_name; fetch height from data.
+                    # For paired PrimitiveInt nodes the height was saved under __paired_h__.
+                    if self._node.paired_height_node_id and name == "value":
+                        h_val = data.get("__paired_h__", widget.get_height())
+                    else:
+                        h_val = data.get(widget._height_name, widget.get_height())
                     widget.set_values(int(value), int(h_val))
                 elif isinstance(widget, QCheckBox):
                     widget.setChecked(bool(value))
@@ -1320,14 +1442,27 @@ class _NodeForm(QGroupBox):
                 if pairs:
                     steps: list[dict] = []
                     for w_val, h_val in pairs:
-                        patch: dict[str, Any] = {
-                            input_name: w_val,
-                            widget._height_name: h_val,
-                        }
-                        if widget._has_batch_size:
-                            patch["batch_size"] = 1
-                        steps.append({node_id: patch})
-                    dims.append((f"{node_title}: {input_name}×{widget._height_name}", steps))
+                        if self._node.paired_height_node_id and input_name == "value":
+                            # Separate PrimitiveInt nodes: each step patches two node IDs
+                            step: dict[str, Any] = {
+                                node_id: {"value": w_val},
+                                self._node.paired_height_node_id: {"value": h_val},
+                            }
+                        else:
+                            patch: dict[str, Any] = {
+                                input_name: w_val,
+                                widget._height_name: h_val,
+                            }
+                            if widget._has_batch_size:
+                                patch["batch_size"] = 1
+                            step = {node_id: patch}
+                        steps.append(step)
+                    label = (
+                        f"{node_title}: width×height"
+                        if self._node.paired_height_node_id and input_name == "value"
+                        else f"{node_title}: {input_name}×{widget._height_name}"
+                    )
+                    dims.append((label, steps))
 
         return dims
 
@@ -1629,6 +1764,7 @@ class WorkflowPanel(QWidget):
 
         for form in self._node_forms:
             overrides[form._node.node_id] = form.get_overrides()
+            overrides.update(form.get_paired_height_override())
             dims.extend(form.get_multi_dims())
 
         # If 2+ multi-dimensions are active, let the user set loop order

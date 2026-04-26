@@ -168,6 +168,7 @@ _EDITABLE_NODE_CLASSES = {
     # Latent image (resolution) nodes — this is the most common place for width/height
     "EmptyLatentImage",
     "EmptySD3LatentImage",
+    "EmptyFlux2LatentImage",
     "EmptyHunyuanLatentVideo",
     "EmptyMochiLatentVideo",
     "EmptyLTXVLatentVideo",
@@ -175,6 +176,15 @@ _EDITABLE_NODE_CLASSES = {
     "EmptyCogVideoXVideo",
     "LatentUpscale",
     "LatentUpscaleBy",
+    # Flux2 / advanced sampler nodes
+    "Flux2Scheduler",
+    "KSamplerSelect",
+    "CFGGuider",
+    "RandomNoise",
+    "SamplerCustomAdvanced",
+    # Primitive value nodes (PrimitiveInt titles like "Width", "Height" drive the label)
+    "PrimitiveInt",
+    "PrimitiveStringMultiline",
     # Output
     "SaveImage",
     "PreviewImage",
@@ -196,6 +206,11 @@ class EditableNode:
         self.class_type = class_type
         self.inputs = inputs  # original input values
         self.title: str = ""  # from _meta.title if present
+        # Set when this is a PrimitiveInt "width" node paired with a separate "height" node
+        self.paired_height_node_id: str | None = None
+        self.paired_height_value: int | None = None
+        # Set on the "height" PrimitiveInt so it is excluded from the returned list
+        self.skip: bool = False
 
     def __repr__(self) -> str:
         return f"EditableNode({self.node_id}, {self.class_type})"
@@ -277,7 +292,60 @@ class WorkflowManager:
             nodes.append(node)
         # Sort: primary-interest nodes first, then alphabetically by class
         nodes.sort(key=lambda n: (n.class_type not in {"KSampler", "CLIPTextEncode"}, n.class_type))
-        return nodes
+        # Detect paired PrimitiveInt nodes (separate width/height primitive nodes)
+        self._detect_prim_int_pairs(nodes)
+        # Exclude height nodes that are now represented inside the paired width node
+        return [n for n in nodes if not n.skip]
+
+    def _detect_prim_int_pairs(self, nodes: list[EditableNode]) -> None:
+        """Scan the raw workflow for width/height ref-pairs that point to PrimitiveInt nodes.
+
+        When found, the "width" node is annotated with the height node's id/value and
+        the "height" node is marked ``skip=True`` so it doesn't get its own form.
+        """
+        # Build the set of PrimitiveInt node IDs that have a literal int 'value'
+        prim_int_ids: set[str] = {
+            n.node_id for n in nodes
+            if n.class_type == "PrimitiveInt" and isinstance(n.inputs.get("value"), int)
+        }
+        if not prim_int_ids:
+            return
+
+        # Scan ALL raw nodes for inputs that reference two different PrimitiveInt nodes
+        # via 'width' and 'height' link slots.
+        width_height_pairs: set[tuple[str, str]] = set()  # (width_prim_id, height_prim_id)
+        for node_data in self._raw.values():
+            raw_inputs = node_data.get("inputs", {})
+            w_ref = raw_inputs.get("width")
+            h_ref = raw_inputs.get("height")
+            if (
+                isinstance(w_ref, list) and len(w_ref) >= 1
+                and isinstance(h_ref, list) and len(h_ref) >= 1
+            ):
+                w_id = str(w_ref[0])
+                h_id = str(h_ref[0])
+                if w_id in prim_int_ids and h_id in prim_int_ids and w_id != h_id:
+                    width_height_pairs.add((w_id, h_id))
+
+        if not width_height_pairs:
+            return
+
+        prim_node_map: dict[str, EditableNode] = {
+            n.node_id: n for n in nodes if n.class_type == "PrimitiveInt"
+        }
+
+        claimed_height_ids: set[str] = set()
+        for w_id, h_id in width_height_pairs:
+            if h_id in claimed_height_ids:
+                continue  # already paired with another width node
+            w_node = prim_node_map.get(w_id)
+            h_node = prim_node_map.get(h_id)
+            if w_node and h_node and w_node.paired_height_node_id is None:
+                w_node.paired_height_node_id = h_id
+                w_node.paired_height_value = h_node.inputs.get("value", w_node.inputs.get("value"))
+                w_node.title = "Width / Height"
+                h_node.skip = True
+                claimed_height_ids.add(h_id)
 
     def get_all_node_ids(self) -> list[str]:
         return list(self._raw.keys())

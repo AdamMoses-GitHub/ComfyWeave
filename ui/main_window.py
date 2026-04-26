@@ -330,11 +330,15 @@ class MainWindow(QMainWindow):
         import uuid as _uuid
 
         def _reseed(ovr: dict) -> dict:
-            """Deep-copy *ovr* and replace every 'seed' with a fresh random int."""
+            """Deep-copy *ovr* and replace every seed input with a fresh random int."""
             result = _copy.deepcopy(ovr)
             for node_inputs in result.values():
-                if isinstance(node_inputs, dict) and "seed" in node_inputs:
+                if not isinstance(node_inputs, dict):
+                    continue
+                if "seed" in node_inputs:
                     node_inputs["seed"] = _random.randint(0, 2_147_483_647)
+                if "noise_seed" in node_inputs:
+                    node_inputs["noise_seed"] = _random.randint(0, 2_147_483_647)
             return result
 
         # Build Cartesian product across all active dims.
