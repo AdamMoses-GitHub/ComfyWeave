@@ -4,7 +4,7 @@
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue) ![Python](https://img.shields.io/badge/python-3.13-blue) ![License](https://img.shields.io/badge/license-MIT-green)
 
-![App Screenshot](INSERT_IMAGE_URL_HERE)
+![App Screenshot](screenshot.jpg)
 
 ---
 
@@ -22,11 +22,13 @@ Running experiments in ComfyUI means endless manual node rewiring — change a s
 
 ### The Main Features
 
-- **Workflow form editor** — load any ComfyUI API-format JSON and get an instant, editable input form for every recognised node (samplers, text encoders, checkpoint/LoRA/VAE loaders, latent image nodes, and more)
+- **Workflow form editor** — load any ComfyUI API-format JSON (or a previously generated PNG) and get an instant, editable input form for every recognised node (samplers, text encoders, checkpoint/LoRA/VAE loaders, latent image nodes, upscalers, and more)
 - **Multi-value batch sweeps** — assign multiple values to any field; ComfyWeave computes the Cartesian product and submits every permutation as individual jobs
 - **Multi-LoRA sweep mode** — pick any number of LoRAs from a searchable checklist; one generation job is queued per LoRA automatically
 - **Live generation feedback** — real-time step progress bar and latent preview images streamed directly from ComfyUI's WebSocket
-- **Image grid viewer** — scrollable thumbnail grid with per-job metadata overlays (LoRA name, batch position, generation group colour-coding) and a full-resolution detail view with zoom/pan
+- **Image grid viewer** — scrollable thumbnail grid with per-job metadata overlays (LoRA name, batch position, generation group colour-coding), a full-resolution detail view with zoom/pan and keyboard navigation, and one-click clipboard copy
+- **Workflow extraction from PNG** — generated images carry their workflow in the PNG metadata; click **Load Workflow** in the detail view (or use **From Image…** in the toolbar) to reload it instantly
+- **Queue controls** — Stop, Clear Queue, **Stop + Clear** (one-click nuclear option), and **↺ Retry** (re-run the last job) without leaving the app
 - **Persistent session state** — last workflow path, all field overrides, window layout, and settings survive restarts
 
 ### The Nerdy Stuff
@@ -34,8 +36,11 @@ Running experiments in ComfyUI means endless manual node rewiring — change a s
 - `qasync` bridges Python `asyncio` with the Qt event loop — no threads, no polling
 - Persistent WebSocket with exponential-backoff reconnect (delays: 1 → 2 → 4 → 8 → 16 → 30 s)
 - Cartesian-product job scheduler with a user-configurable loop-order dialog (slowest-varying → fastest-varying dimension)
+- PNG metadata parsing (both `tEXt` and compressed `iTXt` chunks) for round-trip workflow extraction from generated images
+- 30+ recognised editable node classes including Flux2, SDXL refiners, video-model latent nodes (`EmptyHunyuanLatentVideo`, `EmptyMochiLatentVideo`, etc.), and upscaling nodes
 - Per-field reusable text block library persisted to `config/text_blocks.json`
 - Workflow validation catches the common mistake of loading UI-format JSON instead of API-format, with a clear fix instruction
+- Configurable dimension snapping (multiples of 8 / 16 / 64) and per-badge detail-view overlays
 
 ---
 

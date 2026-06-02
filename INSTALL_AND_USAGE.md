@@ -3,11 +3,14 @@
 ## What ComfyWeave Lets You Do
 
 - Connect to any running ComfyUI instance (local or remote) via its HTTP + WebSocket API
-- Load an API-format workflow JSON and edit all recognised node inputs via a form UI
+- Load an API-format workflow JSON **or a ComfyUI-generated PNG** and edit all recognised node inputs via a form UI
 - Assign **multiple values** to any field to auto-generate every permutation as a batch
 - Run a **Multi-LoRA sweep** — one job per LoRA, submitted automatically
 - Watch live step progress and latent preview images during generation
-- Browse generated images in a scrollable grid with metadata overlays; zoom/pan in a detail view
+- Browse generated images in a scrollable grid with metadata overlays; zoom/pan in a detail view with keyboard navigation
+- Extract the embedded workflow from any generated image and reload it with one click
+- Copy images to the clipboard directly from the detail view
+- Stop, clear, retry, and batch-cancel jobs without leaving the app
 - Save reusable text blocks per prompt field for prompt snippets you use repeatedly
 - Persist all settings, field overrides, and window layout between sessions
 
@@ -96,8 +99,11 @@ COMFYUI_SERVER=http://192.168.1.50:8188 COMFYUI_AUTO_CONNECT=1 python main.py
 
 1. Start ComfyUI, then start ComfyWeave.
 2. In the connection bar, confirm the server URL and click **Connect**.
-3. Click **Load Workflow** and select your API-format `.json` file.
-   > The file must be saved via ComfyUI → Settings → Enable Dev Mode → *Save (API Format)*. Standard workflow files are rejected with a clear error message.
+3. Load your workflow using one of three methods:
+   - **Load Workflow…** — select an API-format `.json` file.
+     > The file must be saved via ComfyUI → Settings → Enable Dev Mode → *Save (API Format)*. Standard workflow files are rejected with a clear error message.
+   - **From Image…** — select any ComfyUI-generated PNG; the embedded workflow is extracted automatically.
+   - **Load Workflow** button in the image detail view — one click re-loads the workflow from whichever image is currently open (see [Workflow #4](#4-image-viewer--export) below).
 4. The left panel populates with editable nodes (KSampler, CLIP text encoders, checkpoint loader, etc.). Edit any values you want.
 5. Set **Batch Count** (how many times to repeat this exact set of inputs) and click **Generate**.
 6. Watch progress in the progress bar at the bottom. Generated images appear in the image grid on the right.
@@ -134,16 +140,34 @@ COMFYUI_SERVER=http://192.168.1.50:8188 COMFYUI_AUTO_CONNECT=1 python main.py
 
 ### 4. Image Viewer & Export
 
-**Scenario:** A sweep just finished — 24 images. You want to find the best one and save it.
+**Scenario:** A sweep just finished — 24 images. You want to find the best one, save it, and reload its workflow for a follow-up run.
 
 1. The image grid on the right auto-populates as jobs complete. Images are grouped by `generation_group_id` (distinct background colour per group).
-2. Use the **←** / **→** buttons or arrow keys in the detail view to step through images. The badge strip (top-right) shows:
+2. Click any thumbnail to open the detail view. Use the **←** / **→** buttons, arrow keys, or swipe to step through images. Press **Escape** to return to the grid.
+3. The badge strip (top-right) shows:
    - **LoRA** name (if a multi-LoRA sweep)
    - **Batch** position (X / Y within this group)
    - **All** position (X of Y across everything)
-3. Use the scroll wheel or drag to zoom/pan in the detail view.
-4. Click **Save As…** to save the current image to disk. The last-used directory is remembered.
-5. In the Queue panel, click **View** on any completed job to jump to that job's images in the grid.
+   > All three badges can be individually toggled in **Settings → Single Image View**.
+4. Use the scroll wheel or drag to zoom/pan in the detail view.
+5. Click **Save As…** to save the current image to disk. The last-used directory is remembered.
+6. Click **Copy** to copy the current image directly to the clipboard.
+7. Click **Load Workflow** to extract the embedded workflow from the image and reload it into the left panel — useful for tweaking a previous run without hunting for the original JSON.
+8. Click **Clear Images** (toolbar, grid view) to wipe the grid and start fresh.
+9. In the Queue panel, click **View** on any completed job to jump to that job's images in the grid.
+
+---
+
+### Generation Controls
+
+Four buttons sit below the **Generate** button and manage in-flight and queued jobs:
+
+| Button | Effect |
+|---|---|
+| **Stop Current** | Interrupt the job currently being processed (queued jobs continue). |
+| **Clear Queue** | Remove all pending jobs; the running job finishes normally. |
+| **Stop + Clear** | Interrupt the current job *and* wipe the entire queue in one click. |
+| **↺ Retry** | Re-submit the last completed or failed job with exactly the same settings. |
 
 ---
 
